@@ -1,0 +1,32 @@
+[
+  {
+    "date": "2024-11-21",
+    "event": "BUS budget set for 2025/26 (£295m)",
+    "source": "Ofgem BUS page"
+  },
+  {
+    "date": "2026-01-23",
+    "event": "ECO4 extension confirmed to 31 December 2026",
+    "source": "GOV.UK ECO4 extension response"
+  },
+  {
+    "date": "2026-03-31",
+    "event": "GBIS scheduled end date",
+    "source": "GOV.UK GBIS stats"
+  },
+  {
+    "date": "2026-07-01",
+    "event": "UK ETS includes domestic maritime from this date (compliance details phase in after)",
+    "source": "GOV.UK / ICAP"
+  },
+  {
+    "date": "2027-01-01",
+    "event": "UK CBAM starts",
+    "source": "GOV.UK CBAM factsheet"
+  },
+  {
+    "date": "2028-03-31",
+    "event": "PSDS Phase 4 delivery window end",
+    "source": "Salix Finance timeline"
+  }
+]
