@@ -37,9 +37,8 @@ NetZero-Dashboard/
 
 ## Run Locally
 
-From `c:\Users\phil\Desktop\Project\Dashboard`:
-
 ```powershell
+git clone https://github.com/TeresaKamiri/NetZero-Dashboard.git
 cd .\NetZero-Dashboard
 python -m venv nz-env
 .\nz-env\Scripts\Activate.ps1
