@@ -73,7 +73,7 @@ Important note:
 ## Data Provenance and Scope
 
 Primary local dataset:
-- `data/Merged_Dataset__Energy___Emissions___HDD.csv`
+- `data/Merged_Energy_Dataset.csv`
 - Current local vintage in config metadata: `UK_1990_2022`
 
 Policy metadata:
