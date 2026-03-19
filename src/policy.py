@@ -93,20 +93,23 @@ def compute_policy_gap_windows(
 def build_risk_register(kpis: dict, policy_gaps: dict, exhaustion_year) -> pd.DataFrame:
     """Build a simple RAG-style risk register from model outputs and policy gaps."""
     rows = []
-    breach_2050 = float(kpis.get("breach_risk_2050", 0.0))
+    target_year = kpis.get("primary_target_year")
+    breach_primary = float(kpis.get("breach_risk_primary", 0.0))
     rag = "Green"
-    if breach_2050 > 0.6:
+    if pd.isna(breach_primary):
+        rag = "Amber"
+    elif breach_primary > 0.6:
         rag = "Red"
-    elif breach_2050 > 0.3:
+    elif breach_primary > 0.3:
         rag = "Amber"
 
     rows.append(
         {
-            "Risk": "2050 target breach",
+            "Risk": f"{target_year} target breach" if target_year is not None else "Target breach",
             "RAG": rag,
             "Owner": "Net Zero Strategy Unit",
-            "Leading indicator": "Breach risk (2050)",
-            "Current value": f"{breach_2050:.1%}",
+            "Leading indicator": f"Breach risk ({target_year})" if target_year is not None else "Breach risk",
+            "Current value": "N/A" if pd.isna(breach_primary) else f"{breach_primary:.1%}",
         }
     )
     rows.append(
