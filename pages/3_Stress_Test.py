@@ -1,5 +1,6 @@
-﻿import streamlit as st
+import numpy as np
 import pandas as pd
+import streamlit as st
 
 from src.data import load_policy_events
 from src.export import export_dataframe_csv, export_dict_json, export_matplotlib_png
@@ -8,10 +9,38 @@ from src.metrics import (
     calculate_budget_exhaustion_year,
     compute_kpis,
     compute_sensitivity_tornado,
+    solve_single_lever_for_breach,
+    solve_target_for_breach,
 )
 from src.policy import compute_policy_gap_windows
 from src.stress_engine import run_scenario
 from src.viz import plot_fan_chart, plot_tornado
+
+
+LEVER_SPECS = {
+    "Demand growth shock (%)": {"group": "levers", "name": "demand_growth_shock_pct", "min": -10.0, "max": 10.0, "step": 0.5},
+    "Policy delay (years)": {"group": "levers", "name": "policy_delay_years", "min": 0.0, "max": 8.0, "step": 1.0},
+    "Rebound intensity": {"group": "levers", "name": "rebound_intensity", "min": 0.0, "max": 1.0, "step": 0.05},
+    "Electrification pace": {"group": "levers", "name": "electrification_pace", "min": 0.0, "max": 1.0, "step": 0.05},
+    "Efficiency improvement (%)": {"group": "levers", "name": "efficiency_improvement_pct", "min": 0.0, "max": 10.0, "step": 0.5},
+    "Space heating reduction (%)": {"group": "interventions", "name": "space_heating_reduction_pct", "min": 0.0, "max": 30.0, "step": 1.0},
+    "Cooking electrification boost (%)": {"group": "interventions", "name": "cooking_electrification_boost", "min": 0.0, "max": 30.0, "step": 1.0},
+    "Industrial efficiency push (%)": {"group": "interventions", "name": "industrial_efficiency_push_pct", "min": 0.0, "max": 20.0, "step": 0.5},
+    "Services demand management (%)": {"group": "interventions", "name": "services_demand_management_pct", "min": 0.0, "max": 15.0, "step": 0.5},
+}
+
+
+def _target_assessment(info: dict) -> str:
+    """Translate target summary diagnostics into user-facing text."""
+    if info["status"] == "outside_horizon":
+        return "Target year is outside the current horizon."
+    if info["status"] == "deterministic":
+        return "Enable uncertainty to estimate a breach probability."
+    if info["saturation"] == "high":
+        return "Configured target sits below nearly the entire simulated range."
+    if info["saturation"] == "low":
+        return "Configured target sits above nearly the entire simulated range."
+    return "Configured target cuts through the simulated range."
 
 
 st.title("Stress Test")
@@ -106,12 +135,47 @@ outputs = run_scenario(cfg)
 kpis = compute_kpis(outputs, cfg)
 exh = calculate_budget_exhaustion_year(outputs, cfg)
 budget_diag = assess_budget_plausibility(outputs, cfg)
+target_summary = kpis["target_breach_risks"]
 
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Breach risk 2035", f"{kpis['breach_risk_2035']:.1%}")
-k2.metric("Breach risk 2050", f"{kpis['breach_risk_2050']:.1%}")
-k3.metric("Budget gap", f"{kpis['budget_gap_mt']:.1f} Mt")
-k4.metric("Budget exhaustion", str(exh))
+metric_cols = st.columns(max(2, len(target_summary) + 2))
+for i, year in enumerate(sorted(target_summary)):
+    info = target_summary[year]
+    value = f"{info['breach_risk']:.1%}" if np.isfinite(info["breach_risk"]) else "N/A"
+    delta = f"target {info['target_mt']:.1f} Mt" if np.isfinite(info["target_mt"]) else "no target"
+    if not info["in_horizon"]:
+        delta = "outside horizon"
+    elif info["status"] == "deterministic":
+        delta = "enable uncertainty"
+    metric_cols[i].metric(f"Breach risk {year}", value, delta)
+metric_cols[-2].metric("Budget gap", f"{kpis['budget_gap_mt']:.1f} Mt")
+metric_cols[-1].metric("Budget exhaustion", str(exh))
+
+diag_rows = []
+for year in sorted(target_summary):
+    info = target_summary[year]
+    diag_rows.append(
+        {
+            "Target year": year,
+            "Target (MtCO2e)": info["target_mt"],
+            "P10 (MtCO2e)": info["p10_mt"],
+            "P50 (MtCO2e)": info["p50_mt"],
+            "P90 (MtCO2e)": info["p90_mt"],
+            "Breach risk": info["breach_risk"],
+            "Attainment probability": info["attainment_prob"],
+            "Assessment": _target_assessment(info),
+        }
+    )
+if diag_rows:
+    st.subheader("Target diagnostics")
+    diag_df = pd.DataFrame(diag_rows)
+    st.dataframe(diag_df, width="stretch")
+    for row in diag_rows:
+        if "outside the current horizon" in row["Assessment"]:
+            st.info(f"{int(row['Target year'])} target is outside the selected horizon, so no breach probability is computed for it.")
+        elif "below nearly the entire simulated range" in row["Assessment"]:
+            st.warning(f"{int(row['Target year'])} target is far below the modeled pathway, so breach risk is effectively saturated high.")
+        elif "above nearly the entire simulated range" in row["Assessment"]:
+            st.info(f"{int(row['Target year'])} target is far above the modeled pathway, so breach risk is effectively saturated low.")
 
 if budget_diag["status"] == "too_low":
     st.warning(f"Budget plausibility check: {budget_diag['message']}")
@@ -124,12 +188,70 @@ st.subheader("Fan chart")
 fan_fig = plot_fan_chart(outputs, cfg)
 st.pyplot(fan_fig, clear_figure=True)
 
+st.subheader("Breach calibration helper")
+if not target_summary:
+    st.info("Add at least one target year and value in Executive Overview to use the calibration helper.")
+else:
+    helper_years = sorted(target_summary)
+    helper_year = st.selectbox("Helper target year", options=helper_years, index=len(helper_years) - 1)
+    desired_breach_pct = st.slider("Desired breach risk (%)", 0, 100, 70, 1)
+    helper_mode = st.radio(
+        "Helper mode",
+        ["Solve target threshold", "Solve single lever"],
+        horizontal=True,
+    )
+    desired_breach = desired_breach_pct / 100.0
+    helper_info = target_summary[helper_year]
+
+    if not helper_info["in_horizon"]:
+        st.info("The selected helper year is outside the current horizon. Extend the horizon or pick another target year.")
+    elif not cfg["uncertainty"]["enabled"]:
+        st.info("Enable uncertainty to estimate a breach probability and use the calibration helper.")
+    elif helper_mode == "Solve target threshold":
+        solved_target = solve_target_for_breach(outputs, helper_year, desired_breach)
+        st.success(
+            f"To target about {desired_breach_pct}% breach in {helper_year}, set the threshold near "
+            f"{solved_target['target_mt']:.1f} MtCO2e under the current scenario."
+        )
+        st.caption(
+            f"Current pathway band for {helper_year}: p10={solved_target['p10_mt']:.1f} Mt, "
+            f"p50={solved_target['p50_mt']:.1f} Mt, p90={solved_target['p90_mt']:.1f} Mt."
+        )
+    else:
+        lever_label = st.selectbox("Lever to tune", options=list(LEVER_SPECS))
+        spec = LEVER_SPECS[lever_label]
+        candidate_values = np.arange(spec["min"], spec["max"] + (spec["step"] / 2.0), spec["step"]).tolist()
+        lever_result = solve_single_lever_for_breach(
+            cfg,
+            spec["group"],
+            spec["name"],
+            candidate_values,
+            helper_year,
+            desired_breach,
+        )
+        current_value = float(cfg[spec["group"]].get(spec["name"], 0.0))
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Current value", f"{current_value:g}")
+        c2.metric("Suggested value", f"{float(lever_result['best_value']):g}")
+        c3.metric("Solved breach", f"{lever_result['best_breach_risk']:.1%}")
+        if lever_result["target_reachable"]:
+            st.success(
+                f"{lever_label} can get close to {desired_breach_pct}% breach for {helper_year} within its current slider range."
+            )
+        else:
+            st.warning(
+                f"{lever_label} alone cannot fully reach {desired_breach_pct}% breach for {helper_year}; "
+                f"the reachable range is about {lever_result['risk_min']:.1%} to {lever_result['risk_max']:.1%}."
+            )
+        lever_df = pd.DataFrame(lever_result["evaluated"])
+        st.dataframe(lever_df, width="stretch")
+
 st.subheader("Sensitivity tornado")
 with st.spinner("Computing sensitivity tornado..."):
     # Tornado uses multiple scenario reruns; keep spinner explicit for user feedback.
     tornado = compute_sensitivity_tornado(cfg)
 if not tornado:
-    st.warning("Sensitivity tornado unavailable for current settings. Keep uncertainty enabled and horizon including 2050.")
+    st.warning("Sensitivity tornado unavailable for current settings. Keep uncertainty enabled and at least one target year inside the horizon.")
 else:
     tornado_fig = plot_tornado(tornado)
     st.pyplot(tornado_fig, clear_figure=True)
@@ -157,14 +279,16 @@ gap_df = pd.DataFrame(rows)
 st.dataframe(gap_df, width="stretch")
 
 if st.checkbox("Auto export report artifacts", value=False, key="export_stress"):
-    kpi_df = pd.DataFrame([
-        kpis
-        | {"budget_exhaustion_year": exh}
-        | {
-            "budget_plausibility_status": budget_diag["status"],
-            "budget_ratio": budget_diag["ratio_budget_to_cumulative"],
-        }
-    ])
+    kpi_df = pd.DataFrame(
+        [
+            kpis
+            | {"budget_exhaustion_year": exh}
+            | {
+                "budget_plausibility_status": budget_diag["status"],
+                "budget_ratio": budget_diag["ratio_budget_to_cumulative"],
+            }
+        ]
+    )
     p1 = export_matplotlib_png(fan_fig, "stress_fan_chart")
     if tornado:
         p2 = export_matplotlib_png(tornado_fig, "stress_tornado")
