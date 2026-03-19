@@ -24,10 +24,13 @@
     "services_demand_management_pct": 0.0
   },
   "targets": {
-    "target_years": [2035, 2050],
+    "target_years": [
+      2035,
+      2050
+    ],
     "target_values": {
-      "2035": 100.0,
-      "2050": 0.0
+      "2035": 85.0,
+      "2050": 15.0
     },
     "target_basis": "Scenario assumptions in MtCO2e for dashboard stress testing; not direct statutory UK target values.",
     "carbon_budget_total": 1500.0
