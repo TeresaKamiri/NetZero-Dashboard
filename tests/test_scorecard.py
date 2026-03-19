@@ -39,7 +39,7 @@ def test_option_scorecard_columns():
     assert not scorecard.empty
     expected = {
         "Option",
-        "AttainProb2050",
+        "AttainProbPrimary",
         "ExpectedRegretMt",
         "DominanceFreq",
         "CostBand",
