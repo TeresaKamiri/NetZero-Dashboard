@@ -1,4 +1,5 @@
 import streamlit as st
+import numpy as np
 
 from src.data import load_policy_events
 from src.metrics import assess_budget_plausibility, calculate_budget_exhaustion_year, compute_kpis
@@ -36,9 +37,17 @@ if budget_diag["status"] != "ok":
 
 st.subheader("Conditional recommendations")
 # Thresholds intentionally align with simple governance trigger bands for fast triage.
-if kpis["breach_risk_2050"] > 0.5:
-    st.error("If 2050 breach risk exceeds 50%, trigger accelerated intervention package and tighten delivery governance.")
-elif kpis["breach_risk_2050"] > 0.2:
-    st.warning("If 2050 breach risk is between 20%-50%, prioritize gap closure in highest-fragility sectors.")
+target_year = kpis.get("primary_target_year")
+target_risk = kpis.get("breach_risk_primary", np.nan)
+if not np.isfinite(target_risk):
+    st.info("No configured target year falls inside the current horizon, so conditional breach recommendations are unavailable.")
+elif target_risk > 0.5:
+    st.error(
+        f"If {target_year} breach risk exceeds 50%, trigger accelerated intervention package and tighten delivery governance."
+    )
+elif target_risk > 0.2:
+    st.warning(
+        f"If {target_year} breach risk is between 20%-50%, prioritize gap closure in highest-fragility sectors."
+    )
 else:
-    st.success("If 2050 breach risk is below 20%, maintain current pathway and monitor leading indicators quarterly.")
+    st.success(f"If {target_year} breach risk is below 20%, maintain current pathway and monitor leading indicators quarterly.")
