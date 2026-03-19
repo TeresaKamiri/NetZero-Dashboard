@@ -6,7 +6,7 @@ A Streamlit decision-support dashboard for UK-focused net-zero planning, combini
 
 - Forecasts emissions trajectories with ARIMA.
 - Validates model behavior with rolling-origin backtesting.
-- Runs Monte Carlo stress tests with fan charts and breach-risk KPIs.
+- Runs Monte Carlo stress tests with fan charts, dynamic target-year breach-risk KPIs, and calibration helpers.
 - Separates scenario uncertainty from model uncertainty to avoid double counting.
 - Compares interventions with a common option scorecard (attainment, regret, dominance, cost, delivery risk).
 - Produces governance-facing outputs: policy gap windows, conditional recommendations, and exportable artifacts.
@@ -53,7 +53,7 @@ Core assumptions are defined in `config.json` and loaded at runtime in Executive
 Key groups:
 - `meta`: scenario label and data vintage metadata.
 - `horizon`: start/end projection years.
-- `targets`: stress-test target thresholds and carbon budget.
+- `targets`: editable target years, target thresholds, and carbon budget.
 - `levers`: demand shock, policy delay, rebound, electrification pace, efficiency improvement.
 - `interventions`: space heating, cooking electrification, industrial efficiency, services demand management.
 - `uncertainty`: scenario/model uncertainty toggles, simulation size, sigmas, and seed.
@@ -62,6 +62,7 @@ Key groups:
 Important note:
 - `targets.target_values` are scenario assumptions in model units (MtCO2e), not direct statutory UK target values.
 - `targets.target_basis` documents this explicitly.
+- `targets.target_years` and `targets.target_values` are evaluated dynamically. The latest configured target year that falls inside the current horizon is treated as the primary target year for governance and scorecard outputs.
 
 ### Config Precedence
 
@@ -69,6 +70,12 @@ Important note:
 2. UI changes in Executive Overview and Stress Test update `st.session_state["config"]`.
 3. Session values are used for model runs and exports during that app session.
 4. `config.json` is not auto-overwritten by UI edits unless explicit save logic is added.
+
+### Target Editing Workflow
+
+- Executive Overview now lets you edit two target years and their corresponding `MtCO2e` thresholds directly.
+- Keep target years inside the selected horizon if you want breach probabilities to be computed for them.
+- If a target year sits outside the current horizon, the Stress Test page will show it as unavailable rather than forcing a misleading breach risk.
 
 ## Data Provenance and Scope
 
@@ -114,7 +121,11 @@ Notes:
 
 Recommended calibration workflow:
 - Set forecast/backtest baseline first (ARIMA diagnostics, rolling errors, interval coverage).
+- Set two planning milestones in Executive Overview, typically one interim year and one end-state year.
 - Tune uncertainty sigmas (`sigma_demand`, `sigma_rebound`, `sigma_model`, `sigma_emissions_intensity`) to match observed variability and calibration behavior.
+- Use the Stress Test calibration helper to either:
+  - solve for the target threshold that corresponds to a desired breach rate, or
+  - solve for the closest single-lever value that reaches a desired breach rate for a chosen target year.
 - Keep policy overlays evidence-based during official policy windows.
 - Mark post-policy-period continuation rows explicitly as modeled assumptions.
 
@@ -145,7 +156,7 @@ cd .\NetZero-Dashboard
 pytest -q
 ```
 
-Tests cover forecast calibration, uncertainty behavior, metrics, and scorecard logic.
+Tests cover forecast calibration, uncertainty behavior, metrics, and scorecard logic. Root-level `conftest.py` excludes Streamlit page modules from pytest collection so `pytest -q` works without trying to execute the app pages as tests.
 
 ## Outputs
 
@@ -156,10 +167,12 @@ When export is enabled in the app, artifacts are written to:
 
 ## Interpretation Guide
 
-- `AttainProb2050`: probability of meeting the configured 2050 threshold.
+- `AttainProbPrimary`: probability of meeting the latest configured target year that falls inside the current horizon.
+- `AttainProbSecondary`: probability of meeting the earlier configured target year when one is available in the current horizon.
 - `ExpectedRegretMt`: expected excess cumulative emissions vs best option under shared scenarios.
 - `DominanceFreq`: share of simulations where an option is best on cumulative emissions.
-- Use all three together; do not rank by a single metric alone.
+- Stress Test target diagnostics show whether a target is below the modeled range, above it, or cutting through it.
+- Use attainment, regret, and dominance together; do not rank by a single metric alone.
 
 ## Limitations and Non-Goals
 
