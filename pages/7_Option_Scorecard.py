@@ -55,8 +55,15 @@ if scorecard.empty:
     st.stop()
 
 ranked = scorecard.copy()
+primary_year = ranked["PrimaryTargetYear"].dropna()
+primary_year = int(primary_year.iloc[0]) if not primary_year.empty else None
+secondary_year = ranked["SecondaryTargetYear"].dropna()
+secondary_year = int(secondary_year.iloc[0]) if not secondary_year.empty else None
+primary_attain_col = "AttainProbPrimary"
+secondary_attain_col = "AttainProbSecondary"
+
 # Min-max normalization keeps metrics on comparable [0,1] scales for aggregation.
-for col in ["AttainProb2050", "DominanceFreq"]:
+for col in [primary_attain_col, "DominanceFreq"]:
     lo = ranked[col].min()
     hi = ranked[col].max()
     ranked[f"{col}_norm"] = 0.0 if hi == lo else (ranked[col] - lo) / (hi - lo)
@@ -67,47 +74,54 @@ for col in ["ExpectedRegretMt"]:
 
 ranked["CompositeScore"] = (
     # Weighting prioritizes long-run attainment, then robustness, then regret.
-    0.50 * ranked["AttainProb2050_norm"]
+    0.50 * ranked[f"{primary_attain_col}_norm"]
     + 0.30 * ranked["DominanceFreq_norm"]
     + 0.20 * (1.0 - ranked["ExpectedRegretMt_norm"])
 )
 ranked = ranked.sort_values("CompositeScore", ascending=False).reset_index(drop=True)
 ranked["Rank"] = ranked.index + 1
 
+table_cols = [
+    "Rank",
+    "Option",
+    primary_attain_col,
+    "ExpectedRegretMt",
+    "DominanceFreq",
+    "BudgetGapMt",
+    "CostBand",
+    "DeliveryRiskBand",
+    "CompositeScore",
+]
+rename_map = {}
+if secondary_year is not None:
+    table_cols.insert(3, secondary_attain_col)
+    rename_map[secondary_attain_col] = f"AttainProb{secondary_year}"
+if primary_year is not None:
+    rename_map[primary_attain_col] = f"AttainProb{primary_year}"
+
 st.subheader("Ranked options")
 st.dataframe(
-    ranked[
-        [
-            "Rank",
-            "Option",
-            "AttainProb2035",
-            "AttainProb2050",
-            "ExpectedRegretMt",
-            "DominanceFreq",
-            "BudgetGapMt",
-            "CostBand",
-            "DeliveryRiskBand",
-            "CompositeScore",
-        ]
-    ],
+    ranked[table_cols].rename(columns=rename_map),
     width="stretch",
 )
 
 best = ranked.iloc[0]
 st.success(
-    f"Top option: {best['Option']} | 2050 attainment={best['AttainProb2050']:.1%}, "
+    f"Top option: {best['Option']} | "
+    f"{primary_year if primary_year is not None else 'primary'} attainment={best[primary_attain_col]:.1%}, "
     f"expected regret={best['ExpectedRegretMt']:.1f} Mt, dominance={best['DominanceFreq']:.1%}."
 )
 
 st.subheader("Attainment vs regret")
-plot_df = ranked.set_index("Option")[["AttainProb2050", "ExpectedRegretMt", "DominanceFreq"]]
+plot_df = ranked.set_index("Option")[[primary_attain_col, "ExpectedRegretMt", "DominanceFreq"]]
+plot_df = plot_df.rename(columns={primary_attain_col: f"AttainProb{primary_year}" if primary_year is not None else "AttainProbPrimary"})
 st.bar_chart(plot_df)
 
 fig_rank = plt.figure(figsize=(10, 4.5))
 ax1 = fig_rank.add_subplot(111)
 x = range(len(ranked))
-ax1.bar(x, ranked["AttainProb2050"], label="Attainment 2050")
-ax1.bar(x, ranked["DominanceFreq"], bottom=ranked["AttainProb2050"], label="Dominance")
+ax1.bar(x, ranked[primary_attain_col], label=f"Attainment {primary_year}" if primary_year is not None else "Primary attainment")
+ax1.bar(x, ranked["DominanceFreq"], bottom=ranked[primary_attain_col], label="Dominance")
 ax1.set_xticks(list(x))
 ax1.set_xticklabels(ranked["Option"], rotation=15, ha="right")
 ax1.set_ylim(0, 2.05)
@@ -121,19 +135,19 @@ fig_scatter = plt.figure(figsize=(8, 4.5))
 ax2 = fig_scatter.add_subplot(111)
 
 # If 2050 attainment is saturated (e.g., all zeros), use fallback y metric.
-y_col = "AttainProb2050"
-y_label = "2050 attainment probability"
-y_title_suffix = "attainment (2050)"
-if ranked["AttainProb2050"].nunique() <= 1:
-    if ranked["AttainProb2035"].nunique() > 1:
-        y_col = "AttainProb2035"
-        y_label = "2035 attainment probability"
-        y_title_suffix = "attainment (2035 fallback)"
+y_col = primary_attain_col
+y_label = f"{primary_year} attainment probability" if primary_year is not None else "Primary attainment probability"
+y_title_suffix = f"attainment ({primary_year})" if primary_year is not None else "primary attainment"
+if ranked[primary_attain_col].nunique() <= 1:
+    if secondary_year is not None and ranked[secondary_attain_col].nunique() > 1:
+        y_col = secondary_attain_col
+        y_label = f"{secondary_year} attainment probability"
+        y_title_suffix = f"attainment ({secondary_year} fallback)"
     else:
         y_col = "DominanceFreq"
         y_label = "Dominance frequency"
         y_title_suffix = "dominance fallback"
-    st.info("2050 attainment is saturated across options; using fallback y-axis for a more informative frontier view.")
+    st.info("Primary attainment is saturated across options; using a fallback y-axis for a more informative frontier view.")
 
 ax2.scatter(ranked["ExpectedRegretMt"], ranked[y_col], s=120, alpha=0.9)
 for i, (_, r) in enumerate(ranked.iterrows()):
