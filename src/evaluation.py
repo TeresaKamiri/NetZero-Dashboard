@@ -1,4 +1,4 @@
-﻿import copy
+import copy
 from typing import Any
 
 import numpy as np
@@ -57,6 +57,12 @@ def evaluate_options(base_config: dict, options: list[dict]) -> tuple[pd.DataFra
         rows.append(
             {
                 "Option": opt["name"],
+                "PrimaryTargetYear": kpis["primary_target_year"],
+                "SecondaryTargetYear": kpis["secondary_target_year"],
+                "BreachRiskPrimary": kpis["breach_risk_primary"],
+                "AttainProbPrimary": kpis["attain_prob_primary"],
+                "BreachRiskSecondary": kpis["breach_risk_secondary"],
+                "AttainProbSecondary": kpis["attain_prob_secondary"],
                 "BreachRisk2035": kpis["breach_risk_2035"],
                 "BreachRisk2050": kpis["breach_risk_2050"],
                 "AttainProb2035": 1.0 - kpis["breach_risk_2035"],
@@ -67,6 +73,9 @@ def evaluate_options(base_config: dict, options: list[dict]) -> tuple[pd.DataFra
                 "DeliveryRiskBand": opt.get("delivery_risk", "Unknown"),
             }
         )
+        for year, info in kpis["target_breach_risks"].items():
+            rows[-1][f"BreachRisk{year}"] = info["breach_risk"]
+            rows[-1][f"AttainProb{year}"] = info["attainment_prob"]
 
     scorecard = pd.DataFrame(rows)
     if scorecard.empty:
@@ -83,7 +92,7 @@ def evaluate_options(base_config: dict, options: list[dict]) -> tuple[pd.DataFra
     scorecard["ExpectedRegretMt"] = exp_regret
     scorecard["DominanceFreq"] = dominance
     scorecard = scorecard.sort_values(
-        ["AttainProb2050", "ExpectedRegretMt", "DeliveryRiskBand"],
+        ["AttainProbPrimary", "ExpectedRegretMt", "DeliveryRiskBand"],
         ascending=[False, True, True],
     ).reset_index(drop=True)
     return scorecard, per_option
