@@ -34,6 +34,7 @@ FALLBACK_CONFIG = {
         "services_demand_management_pct": 0.0,
     },
     "targets": {
+        "target_years": [2035, 2050],
         "target_values": {"2035": 100.0, "2050": 0.0},
         "carbon_budget_total": 1500.0,
     },
@@ -92,20 +93,59 @@ cfg["horizon"]["end_year"] = int(
 cfg["baseline_year"] = int(col3.number_input("Baseline year", value=cfg["baseline_year"]))
 
 st.subheader("Targets")
-t1, t2, t3 = st.columns(3)
-cfg["targets"]["target_values"]["2035"] = float(
-    t1.number_input(
-        "2035 target (MtCO2e)", value=float(cfg["targets"]["target_values"]["2035"])
+target_years = []
+for raw in cfg["targets"].get("target_years", []):
+    try:
+        target_years.append(int(raw))
+    except (TypeError, ValueError):
+        continue
+for raw in cfg["targets"].get("target_values", {}).keys():
+    try:
+        target_years.append(int(raw))
+    except (TypeError, ValueError):
+        continue
+target_years = sorted(set(target_years))
+if not target_years:
+    target_years = [2035, 2050]
+if len(target_years) == 1:
+    target_years.append(max(target_years[0] + 15, cfg["horizon"]["end_year"]))
+
+editable_years = target_years[:2]
+preserved_years = target_years[2:]
+preserved_targets = {
+    str(year): float(cfg["targets"]["target_values"].get(str(year), 0.0)) for year in preserved_years
+}
+
+if preserved_years:
+    st.info(
+        "Additional configured target years are preserved in the session config. "
+        "This page edits the first two target years directly."
+    )
+
+y1, y2, v1, v2, t_budget = st.columns(5)
+year_1 = int(y1.number_input("Target year 1", value=int(editable_years[0]), step=1))
+year_2 = int(y2.number_input("Target year 2", value=int(editable_years[1]), step=1))
+value_1 = float(
+    v1.number_input(
+        "Target 1 (MtCO2e)",
+        value=float(cfg["targets"]["target_values"].get(str(editable_years[0]), 100.0)),
     )
 )
-cfg["targets"]["target_values"]["2050"] = float(
-    t2.number_input(
-        "2050 target (MtCO2e)", value=float(cfg["targets"]["target_values"]["2050"])
+value_2 = float(
+    v2.number_input(
+        "Target 2 (MtCO2e)",
+        value=float(cfg["targets"]["target_values"].get(str(editable_years[1]), 0.0)),
     )
 )
 cfg["targets"]["carbon_budget_total"] = float(
-    t3.number_input("Budget total (MtCO2e)", value=float(cfg["targets"]["carbon_budget_total"]))
+    t_budget.number_input("Budget total (MtCO2e)", value=float(cfg["targets"]["carbon_budget_total"]))
 )
+
+edited_targets = preserved_targets | {str(year_1): value_1, str(year_2): value_2}
+cfg["targets"]["target_values"] = edited_targets
+cfg["targets"]["target_years"] = sorted({int(year_1), int(year_2), *preserved_years})
+if year_1 == year_2:
+    st.warning("Target years should be distinct. Duplicate years will share the latest entered target value.")
 
 st.session_state["config"] = cfg
 st.success("Scenario config loaded and saved to session.")
